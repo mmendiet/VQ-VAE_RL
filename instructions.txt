@@ -1,0 +1,11 @@
+python3 my_vqvae.py --data-folder /1TB/Datasets/Atari/data3/ --dataset atari --hidden-size 256 --k 512 --batch-size 128 --num-epochs 100 --lr 0.0002 --beta 1.0 --output-folder test --num-workers 8 --device cuda:0 --out-game IceHockey
+
+pip install torchvision
+pip install tensorboardX
+
+
+http://127.0.0.1:16006
+ssh -X -L 16006:127.0.0.1:6006 matias@10.16.26.219
+tensorboard --logdir log
+
+python3 my_vqvae.py --data-folder /1TB/Datasets/Atari/data3/ --dataset atari --hidden-size 256 --k 512 --batch-size 128 --num-epochs 1000 --lr 0.0002 --beta 1.0 --output-folder others_v0 --num-workers 12 --device cuda:0 --out-game IceHockey

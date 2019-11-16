@@ -30,23 +30,24 @@ def train(data_loader, model, optimizer, args, writer):
         x_tilde, z_e_x, z_q_x = model(local_batch)
 
         # Reconstruction loss
-        #loss_recons = F.mse_loss(x_tilde, local_labels)
-        loss_recons = F.mse_loss(x_tilde[:,0:3,:,:], local_labels[:,0:3,:,:])
-        loss_reward = F.mse_loss(torch.mean(x_tilde[:,3,:,:]), torch.mean(local_labels[:,3,:,:]))
+        loss_recons = F.mse_loss(x_tilde, local_labels)
+        #loss_recons = F.mse_loss(x_tilde[:,0:3,:,:], local_labels[:,0:3,:,:])
+        #loss_reward = F.mse_loss(torch.mean(x_tilde[:,3,:,:]), torch.mean(local_labels[:,3,:,:]))
         #loss_reward = F.mse_loss(x_tilde[:,3,:,:], local_labels[:,3,:,:])
         # Vector quantization objective
         loss_vq = F.mse_loss(z_q_x, z_e_x.detach())
         # Commitment objective
         loss_commit = F.mse_loss(z_e_x, z_q_x.detach())
 
-        loss = loss_recons + loss_vq + args.beta * loss_commit + 0.1 * loss_reward
+        loss = loss_recons + loss_vq + args.beta * loss_commit# + 0.1 * loss_reward
+        loss = torch.clamp(loss, loss.item(), 10)
         loss.backward()
 
         # Logs
         writer.add_scalar('loss/train/reconstruction', loss_recons.item(), args.steps)
         writer.add_scalar('loss/train/quantization', loss_vq.item(), args.steps)
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 20)
+        #torch.nn.utils.clip_grad_norm_(model.parameters(), 10)
         optimizer.step()
         args.steps += 1
 
@@ -88,32 +89,38 @@ def main(args):
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
 
-        dictDir = 'test_dict/'
+        dictDir = args.data_folder+'data_dict/'
+        dataDir = args.data_folder+'data_traj/'
+        #dictDir = args.data_folder+'test_dict/'
+        #dataDir = args.data_folder+'test_traj/'
         all_partition = defaultdict(list)
         all_labels = defaultdict(list)
         # Datasets
         for dictionary in os.listdir(dictDir):
-            dfile = open(dictDir+dictionary, 'rb')
-            d = pickle.load(dfile)
-            dfile.close()
-            if("partition" in dictionary):
-                for key in d:
-                    all_partition[key] += d[key]
-            elif("labels" in dictionary):
-                for key in d:
-                    all_labels[key] = d[key]
-            else:
-                print("Error: Unexpected data dictionary")
+            ########
+            if args.out_game not in dictionary:
+                #######
+                dfile = open(dictDir+dictionary, 'rb')
+                d = pickle.load(dfile)
+                dfile.close()
+                if("partition" in dictionary):
+                    for key in d:
+                        all_partition[key] += d[key]
+                elif("labels" in dictionary):
+                    for key in d:
+                        all_labels[key] = d[key]
+                else:
+                    print("Error: Unexpected data dictionary")
         #partition = # IDs
         #labels = # Labels
 
         # Generators
-        training_set = Dataset(all_partition['train'], all_labels)
+        training_set = Dataset(all_partition['train'], all_labels, dataDir)
         train_loader = data.DataLoader(training_set, batch_size=args.batch_size, shuffle=True,
             num_workers=args.num_workers, pin_memory=True)
 
-        validation_set = Dataset(all_partition['validation'], all_labels)
-        valid_loader = data.DataLoader(validation_set, batch_size=args.batch_size, shuffle=True, drop_last=True,
+        validation_set = Dataset(all_partition['validation'], all_labels, dataDir)
+        valid_loader = data.DataLoader(validation_set, batch_size=args.batch_size, shuffle=True, drop_last=False,
             num_workers=args.num_workers, pin_memory=True)
         test_loader = data.DataLoader(validation_set, batch_size=16, shuffle=True)
         input_channels = 13
@@ -132,7 +139,7 @@ def main(args):
     # Fixed images for Tensorboard
     fixed_images, fixed_y = next(iter(test_loader))
     fixed_y = fixed_y[:,0:3,:,:]
-    fixed_grid = make_grid(fixed_y, nrow=8, range=(-1, 1), normalize=True)
+    fixed_grid = make_grid(fixed_y, nrow=8, range=(0, 1), normalize=True)
     writer.add_image('original', fixed_grid, 0)
 
     model = VectorQuantizedVAE(input_channels, output_channels, args.hidden_size, args.k).to(args.device)
@@ -141,17 +148,18 @@ def main(args):
     # Generate the samples first once
     reconstruction = generate_samples(fixed_images, model, args)
     reconstruction_image = reconstruction[:,0:3,:,:]
-    grid = make_grid(reconstruction_image.cpu(), nrow=8, range=(-1, 1), normalize=True)
+    grid = make_grid(reconstruction_image.cpu(), nrow=8, range=(0, 1), normalize=True)
     writer.add_image('reconstruction', grid, 0)
 
     best_loss = -1.
+    print("Starting to train...")
     for epoch in range(args.num_epochs):
         train(train_loader, model, optimizer, args, writer)
         loss, _ = test(valid_loader, model, args, writer)
         print("Finished Epoch: " + str(epoch) + "   Validation Loss: " + str(loss))
         reconstruction = generate_samples(fixed_images, model, args)
         reconstruction_image = reconstruction[:,0:3,:,:]
-        grid = make_grid(reconstruction_image.cpu(), nrow=8, range=(-1, 1), normalize=True)
+        grid = make_grid(reconstruction_image.cpu(), nrow=8, range=(0, 1), normalize=True)
         writer.add_image('reconstruction', grid, epoch + 1)
 
         if (epoch == 0) or (loss < best_loss):
@@ -173,6 +181,8 @@ if __name__ == '__main__':
         help='name of the data folder')
     parser.add_argument('--dataset', type=str,
         help='name of the dataset (mnist, fashion-mnist, cifar10, miniimagenet)')
+    parser.add_argument('--out-game', type=str,default='IceHockey',
+        help='name of the 11th game')
 
     # Latent space
     parser.add_argument('--hidden-size', type=int, default=256,
@@ -193,7 +203,7 @@ if __name__ == '__main__':
     # Miscellaneous
     parser.add_argument('--output-folder', type=str, default='vqvae',
         help='name of the output folder (default: vqvae)')
-    parser.add_argument('--num-workers', type=int, default=6,#mp.cpu_count() - 1
+    parser.add_argument('--num-workers', type=int, default=mp.cpu_count() - 1,
         help='number of workers for trajectories sampling (default: {0})'.format(mp.cpu_count() - 1))
     parser.add_argument('--device', type=str, default='cpu',
         help='set the device (cpu or cuda, default: cpu)')

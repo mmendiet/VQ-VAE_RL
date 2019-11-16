@@ -4,10 +4,11 @@ from torch.utils import data
 
 class Dataset(data.Dataset):
   'Characterizes a dataset for PyTorch'
-  def __init__(self, list_IDs, labels):
+  def __init__(self, list_IDs, labels, dataDir):
         'Initialization'
         self.labels = labels
         self.list_IDs = list_IDs
+        self.dataDir = dataDir
 
   def __len__(self):
         'Denotes the total number of samples'
@@ -19,16 +20,16 @@ class Dataset(data.Dataset):
         ID = self.list_IDs[index]
 
         # Load data and get label
-        X = np.load('test_data/' + ID + '.npz')
+        X = np.load(self.dataDir + ID + '.npz')
         X = torch.from_numpy(X['arr_0']).float().permute(2,0,1)
         X[0:12,:,:] = X[0:12,:,:]/256
+        X[12,:,:] = X[12,:,:]/17
         #shape = X[12,:,:]
         #X[12,:,:] = X[12,:,:]
         outFile = self.labels[ID]
-        y = np.load('test_data/' + outFile + '.npz')
-        y = torch.from_numpy(y['arr_0']).float().permute(2,0,1)/256
-        #y[0:3,:,:] = y[0:3,:,:]/256
-        #shape2 = y[3,:,:].shape
-        #y[3,:,:] = y[3,:,:]/(shape2[0]*shape2[1])
+        y = np.load(self.dataDir + outFile + '.npz')
+        y = torch.from_numpy(y['arr_0']).float().permute(2,0,1)
+        y[0:3,:,:] = y[0:3,:,:]/256
+        y[3,:,:] = np.clip(y[3,:,:], -1, 1)
 
         return X, y
